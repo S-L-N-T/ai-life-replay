@@ -70,21 +70,32 @@ interface ChatMessage {
   content: string
 }
 
+export interface ApiSettingsOverride {
+  baseURL?: string
+  apiKey?: string
+  model?: string
+}
+
 interface AIStreamOptions {
   messages: ChatMessage[]
   temperature?: number
   maxTokens?: number
+  apiSettings?: ApiSettingsOverride
 }
 
 export async function* streamAI(options: AIStreamOptions): AsyncGenerator<string> {
-  const response = await fetch(`${AI_API_BASE}/chat/completions`, {
+  const baseURL = options.apiSettings?.baseURL?.trim() || AI_API_BASE
+  const apiKey = options.apiSettings?.apiKey?.trim() || AI_API_KEY
+  const model = options.apiSettings?.model?.trim() || AI_MODEL
+
+  const response = await fetch(`${baseURL}/chat/completions`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'Authorization': `Bearer ${AI_API_KEY}`,
+      'Authorization': `Bearer ${apiKey}`,
     },
     body: JSON.stringify({
-      model: AI_MODEL,
+      model,
       messages: options.messages,
       temperature: options.temperature ?? 0.8,
       max_tokens: options.maxTokens ?? 4096,

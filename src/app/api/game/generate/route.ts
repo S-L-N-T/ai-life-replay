@@ -5,8 +5,9 @@ import { streamAI, buildGeneratePrompt } from '../api'
 // 生成游戏事件 (SSE Streaming)
 export async function POST(request: NextRequest) {
   const body = await request.json()
+  const { apiSettings, ...gameBody } = body
 
-  const messages = buildGeneratePrompt(body)
+  const messages = buildGeneratePrompt(gameBody)
 
   const encoder = new TextEncoder()
 
@@ -14,7 +15,7 @@ export async function POST(request: NextRequest) {
     async start(controller) {
       try {
         let fullText = ''
-        for await (const chunk of streamAI({ messages, temperature: 0.85, maxTokens: 2048 })) {
+        for await (const chunk of streamAI({ messages, temperature: 0.85, maxTokens: 2048, apiSettings })) {
           fullText += chunk
           const data = JSON.stringify({ text: chunk })
           controller.enqueue(encoder.encode(`data: ${data}\n\n`))

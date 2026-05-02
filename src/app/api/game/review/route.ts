@@ -5,8 +5,9 @@ import { streamAI, buildReviewPrompt } from '../api'
 // 生成人生总结 (SSE Streaming)
 export async function POST(request: NextRequest) {
   const body = await request.json()
+  const { apiSettings, ...gameBody } = body
 
-  const messages = buildReviewPrompt(body)
+  const messages = buildReviewPrompt(gameBody)
 
   const encoder = new TextEncoder()
 
@@ -14,7 +15,7 @@ export async function POST(request: NextRequest) {
     async start(controller) {
       try {
         let fullText = ''
-        for await (const chunk of streamAI({ messages, temperature: 0.7, maxTokens: 2048 })) {
+        for await (const chunk of streamAI({ messages, temperature: 0.7, maxTokens: 2048, apiSettings })) {
           fullText += chunk
           const data = JSON.stringify({ text: chunk })
           controller.enqueue(encoder.encode(`data: ${data}\n\n`))
