@@ -1,6 +1,7 @@
 // 前端 API 调用封装 - SSE 流式解析
 
 import { useSettingsStore } from '@/store/settingsStore'
+import { deepTrim } from '@/lib/urlUtils'
 
 // ============================================================
 // 内部辅助：将 API 设置注入请求体，并记录日志
@@ -9,9 +10,9 @@ import { useSettingsStore } from '@/store/settingsStore'
 function buildRequestBody(body: Record<string, unknown>): Record<string, unknown> {
   const { apiSettings, addLog } = useSettingsStore.getState()
   const overrides: Record<string, string> = {}
-  if (apiSettings.baseURL.trim()) overrides.baseURL = apiSettings.baseURL.trim()
-  if (apiSettings.apiKey.trim()) overrides.apiKey = apiSettings.apiKey.trim()
-  if (apiSettings.model.trim()) overrides.model = apiSettings.model.trim()
+  if (deepTrim(apiSettings.baseURL)) overrides.baseURL = deepTrim(apiSettings.baseURL)
+  if (deepTrim(apiSettings.apiKey)) overrides.apiKey = deepTrim(apiSettings.apiKey)
+  if (deepTrim(apiSettings.model)) overrides.model = deepTrim(apiSettings.model)
 
   if (Object.keys(overrides).length > 0) {
     addLog('info', `使用自定义 API 设置: baseURL=${overrides.baseURL || '默认'}, model=${overrides.model || '默认'}`)

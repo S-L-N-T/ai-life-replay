@@ -2,6 +2,7 @@
 // 后端 API 逻辑 - 使用 OpenAI 兼容 API
 
 import { NextRequest } from 'next/server'
+import { deepTrim, normalizeBaseURL } from '@/lib/urlUtils'
 
 // ============================================================
 // 类型定义
@@ -84,9 +85,10 @@ interface AIStreamOptions {
 }
 
 export async function* streamAI(options: AIStreamOptions): AsyncGenerator<string> {
-  const baseURL = options.apiSettings?.baseURL?.trim() || AI_API_BASE
-  const apiKey = options.apiSettings?.apiKey?.trim() || AI_API_KEY
-  const model = options.apiSettings?.model?.trim() || AI_MODEL
+  // Deep-trim to strip newlines, invisible Unicode chars, etc. before any URL work
+  const baseURL = normalizeBaseURL(options.apiSettings?.baseURL ? deepTrim(options.apiSettings.baseURL) : (AI_API_BASE))
+  const apiKey = options.apiSettings?.apiKey ? deepTrim(options.apiSettings.apiKey) : deepTrim(AI_API_KEY)
+  const model = options.apiSettings?.model ? deepTrim(options.apiSettings.model) : deepTrim(AI_MODEL)
 
   // Validate baseURL to prevent SSRF – only http/https are permitted.
   // Note: the user-provided URL is intentionally forwarded so users can configure

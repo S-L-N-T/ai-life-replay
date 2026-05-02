@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useSettingsStore, ApiSettings } from '@/store/settingsStore'
+import { deepTrim, normalizeBaseURL } from '@/lib/urlUtils'
 
 // ModalContent mounts fresh every time the modal opens, so useState(apiSettings)
 // always picks up the latest stored settings without needing a useEffect sync.
@@ -17,23 +18,47 @@ function ModalContent({ initialSettings, onClose }: {
   const [isFetchingModels, setIsFetchingModels] = useState(false)
 
   const handleSave = () => {
-    setApiSettings(localSettings)
+    const cleaned: ApiSettings = {
+      baseURL: normalizeBaseURL(localSettings.baseURL),
+      apiKey: deepTrim(localSettings.apiKey),
+      model: deepTrim(localSettings.model),
+    }
+
+    // Provide early feedback if the base URL looks invalid
+    if (cleaned.baseURL) {
+      try {
+        const parsed = new URL(cleaned.baseURL)
+        if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
+          showToast('error', '不支持的 URL 协议，仅允许 http/https')
+          addLog('error', `无效的 Base URL 协议: ${cleaned.baseURL}`)
+          return
+        }
+      } catch {
+        showToast('error', `无效的 Base URL: ${cleaned.baseURL}`)
+        addLog('error', `无效的 Base URL: ${cleaned.baseURL}`)
+        return
+      }
+    }
+
+    setApiSettings(cleaned)
     showToast('success', '设置已保存')
-    addLog('info', `API 设置已更新: baseURL=${localSettings.baseURL || '默认'}, model=${localSettings.model || '默认'}`)
+    addLog('info', `API 设置已更新: baseURL=${cleaned.baseURL || '默认'}, model=${cleaned.model || '默认'}`)
     onClose()
   }
 
   const handleFetchModels = async () => {
     setIsFetchingModels(true)
     setModels([])
-    addLog('info', `正在获取模型列表: baseURL=${localSettings.baseURL || '默认'}`)
+    const trimmedBase = normalizeBaseURL(localSettings.baseURL)
+    const trimmedKey = deepTrim(localSettings.apiKey)
+    addLog('info', `正在获取模型列表: baseURL=${trimmedBase || '默认'}`)
     try {
       const response = await fetch('/api/game/models', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          baseURL: localSettings.baseURL || undefined,
-          apiKey: localSettings.apiKey || undefined,
+          baseURL: trimmedBase || undefined,
+          apiKey: trimmedKey || undefined,
         }),
       })
       const data = await response.json()
