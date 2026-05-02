@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { deepTrim, normalizeBaseURL } from '@/lib/urlUtils'
 
 // POST /api/game/models
 // 获取可用模型列表（从自定义 AI API 获取）
@@ -13,8 +14,10 @@ export async function POST(request: NextRequest) {
   const AI_API_BASE = process.env.AI_API_BASE || 'https://ark.cn-beijing.volces.com/api/v3'
   const AI_API_KEY = process.env.AI_API_KEY || ''
 
-  const baseURL = body.baseURL?.trim() || AI_API_BASE
-  const apiKey = body.apiKey?.trim() || AI_API_KEY
+  // Deep-trim to strip newlines, invisible Unicode chars, etc. before any URL work
+  const rawBase = body.baseURL ? deepTrim(body.baseURL) : ''
+  const baseURL = normalizeBaseURL(rawBase || AI_API_BASE)
+  const apiKey = body.apiKey ? deepTrim(body.apiKey) : deepTrim(AI_API_KEY)
 
   if (!apiKey) {
     return NextResponse.json({ error: 'API Key 未配置' }, { status: 400 })
@@ -29,11 +32,22 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: '不支持的 URL 协议，仅允许 http/https' }, { status: 400 })
     }
   } catch {
-    return NextResponse.json({ error: '无效的 Base URL' }, { status: 400 })
+    return NextResponse.json({ error: `无效的 Base URL: ${baseURL}` }, { status: 400 })
+  }
+
+  // Build the models endpoint URL and catch any construction errors
+  let modelsUrl: string
+  try {
+    modelsUrl = new URL(`${baseURL}/models`).href
+  } catch {
+    return NextResponse.json({ error: `无法构造 models URL: ${baseURL}/models` }, { status: 400 })
   }
 
   try {
-    const response = await fetch(`${baseURL}/models`, {
+    // Note: the user-provided URL is intentionally forwarded so users can configure
+    // their own AI API provider. The protocol check above limits SSRF attack surface
+    // to http/https only, consistent with the companion streamAI function.
+    const response = await fetch(modelsUrl, {
       method: 'GET',
       headers: {
         Authorization: `Bearer ${apiKey}`,
