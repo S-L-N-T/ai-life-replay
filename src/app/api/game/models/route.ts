@@ -20,7 +20,9 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'API Key 未配置' }, { status: 400 })
   }
 
-  // Validate baseURL to prevent SSRF – only http/https are permitted
+  // Validate baseURL to prevent SSRF – only http/https are permitted.
+  // Note: the user-provided URL is intentionally forwarded so users can configure
+  // their own AI API provider; the protocol check limits attack surface.
   try {
     const parsed = new URL(baseURL)
     if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {

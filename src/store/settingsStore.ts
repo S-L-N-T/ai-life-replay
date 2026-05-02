@@ -51,10 +51,19 @@ interface SettingsStore {
   dismissToast: (id: string) => void
 }
 
+// Fallback for environments where crypto.randomUUID is unavailable
+function generateId(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID()
+  }
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
+}
+
+
+
 // ============================================================
 // 创建 Store（设置持久化，其余状态不持久化）
 // ============================================================
-
 export const useSettingsStore = create<SettingsStore>()(
   persist(
     (set, get) => ({
@@ -72,7 +81,7 @@ export const useSettingsStore = create<SettingsStore>()(
       logs: [],
       addLog: (level, message) => {
         const entry: LogEntry = {
-          id: crypto.randomUUID(),
+          id: generateId(),
           timestamp: Date.now(),
           level,
           message,
@@ -89,7 +98,7 @@ export const useSettingsStore = create<SettingsStore>()(
 
       toasts: [],
       showToast: (type, message) => {
-        const id = crypto.randomUUID()
+        const id = generateId()
         set((state) => ({
           toasts: [...state.toasts, { id, type, message }],
         }))

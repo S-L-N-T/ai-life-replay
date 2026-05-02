@@ -88,7 +88,9 @@ export async function* streamAI(options: AIStreamOptions): AsyncGenerator<string
   const apiKey = options.apiSettings?.apiKey?.trim() || AI_API_KEY
   const model = options.apiSettings?.model?.trim() || AI_MODEL
 
-  // Validate baseURL to prevent SSRF – only http/https are permitted
+  // Validate baseURL to prevent SSRF – only http/https are permitted.
+  // Note: the user-provided URL is intentionally forwarded so users can configure
+  // their own AI API provider; the protocol check limits attack surface.
   try {
     const parsed = new URL(baseURL)
     if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
