@@ -20,6 +20,16 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'API Key 未配置' }, { status: 400 })
   }
 
+  // Validate baseURL to prevent SSRF – only http/https are permitted
+  try {
+    const parsed = new URL(baseURL)
+    if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
+      return NextResponse.json({ error: '不支持的 URL 协议，仅允许 http/https' }, { status: 400 })
+    }
+  } catch {
+    return NextResponse.json({ error: '无效的 Base URL' }, { status: 400 })
+  }
+
   try {
     const response = await fetch(`${baseURL}/models`, {
       method: 'GET',

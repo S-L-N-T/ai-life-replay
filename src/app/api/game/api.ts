@@ -88,6 +88,17 @@ export async function* streamAI(options: AIStreamOptions): AsyncGenerator<string
   const apiKey = options.apiSettings?.apiKey?.trim() || AI_API_KEY
   const model = options.apiSettings?.model?.trim() || AI_MODEL
 
+  // Validate baseURL to prevent SSRF – only http/https are permitted
+  try {
+    const parsed = new URL(baseURL)
+    if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
+      throw new Error('不支持的 URL 协议，仅允许 http/https')
+    }
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : '无效的 Base URL'
+    throw new Error(msg)
+  }
+
   const response = await fetch(`${baseURL}/chat/completions`, {
     method: 'POST',
     headers: {

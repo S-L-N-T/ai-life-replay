@@ -72,7 +72,7 @@ export const useSettingsStore = create<SettingsStore>()(
       logs: [],
       addLog: (level, message) => {
         const entry: LogEntry = {
-          id: Math.random().toString(36).slice(2, 10),
+          id: crypto.randomUUID(),
           timestamp: Date.now(),
           level,
           message,
@@ -89,7 +89,7 @@ export const useSettingsStore = create<SettingsStore>()(
 
       toasts: [],
       showToast: (type, message) => {
-        const id = Math.random().toString(36).slice(2, 10)
+        const id = crypto.randomUUID()
         set((state) => ({
           toasts: [...state.toasts, { id, type, message }],
         }))
