@@ -1,5 +1,25 @@
 // 前端 API 调用封装 - SSE 流式解析
 
+import { useSettingsStore } from '@/store/settingsStore'
+
+// ============================================================
+// 内部辅助：将 API 设置注入请求体，并记录日志
+// ============================================================
+
+function buildRequestBody(body: Record<string, unknown>): Record<string, unknown> {
+  const { apiSettings, addLog } = useSettingsStore.getState()
+  const overrides: Record<string, string> = {}
+  if (apiSettings.baseURL.trim()) overrides.baseURL = apiSettings.baseURL.trim()
+  if (apiSettings.apiKey.trim()) overrides.apiKey = apiSettings.apiKey.trim()
+  if (apiSettings.model.trim()) overrides.model = apiSettings.model.trim()
+
+  if (Object.keys(overrides).length > 0) {
+    addLog('info', `使用自定义 API 设置: baseURL=${overrides.baseURL || '默认'}, model=${overrides.model || '默认'}`)
+    return { ...body, apiSettings: overrides }
+  }
+  return body
+}
+
 // ============================================================
 // 通用 SSE 流式请求
 // ============================================================
@@ -12,23 +32,34 @@ export async function streamRequest(
   onError: (error: string) => void,
   signal?: AbortSignal
 ): Promise<void> {
+  const { addLog, showToast } = useSettingsStore.getState()
+  const enrichedBody = buildRequestBody(body)
+
+  addLog('info', `→ POST ${url}`)
+
   try {
     const response = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
+      body: JSON.stringify(enrichedBody),
       signal,
     })
 
     if (!response.ok) {
       const errText = await response.text()
-      onError(`API 错误 (${response.status}): ${errText}`)
+      const msg = `API 错误 (${response.status}): ${errText}`
+      addLog('error', `← ${url} ${msg}`)
+      showToast('error', msg)
+      onError(msg)
       return
     }
 
     const reader = response.body?.getReader()
     if (!reader) {
-      onError('无法读取响应流')
+      const msg = '无法读取响应流'
+      addLog('error', `← ${url} ${msg}`)
+      showToast('error', msg)
+      onError(msg)
       return
     }
 
@@ -50,6 +81,7 @@ export async function streamRequest(
 
         const data = trimmed.slice(6).trim()
         if (data === '[DONE]') {
+          addLog('info', `← ${url} 完成，总长度: ${fullText.length} 字`)
           onDone(fullText)
           return
         }
@@ -60,6 +92,8 @@ export async function streamRequest(
             fullText += parsed.text
             onChunk(parsed.text)
           } else if (parsed.error) {
+            addLog('error', `← ${url} 流错误: ${parsed.error}`)
+            showToast('error', parsed.error)
             onError(parsed.error)
             return
           }
@@ -69,12 +103,17 @@ export async function streamRequest(
       }
     }
 
+    addLog('info', `← ${url} 完成，总长度: ${fullText.length} 字`)
     onDone(fullText)
   } catch (err: any) {
     if (err.name === 'AbortError') return
-    onError(err.message || '网络请求失败')
+    const msg = err.message || '网络请求失败'
+    addLog('error', `← ${url} 异常: ${msg}`)
+    showToast('error', msg)
+    onError(msg)
   }
 }
+
 
 // ============================================================
 // 游戏 API 调用

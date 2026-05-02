@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useGameStore } from '@/store/gameStore'
+import { useSettingsStore } from '@/store/settingsStore'
 import { generateBackground, generateEvents } from '@/lib/api'
 import type { YearEvent } from '@/store/gameStore'
 
@@ -42,6 +43,9 @@ export default function GamePlay({
   const abortRef = useRef<AbortController | null>(null)
   const displayRef = useRef('')
   const bottomRef = useRef<HTMLDivElement>(null)
+
+  const showToast = useSettingsStore((s) => s.showToast)
+  const addLog = useSettingsStore((s) => s.addLog)
 
   // 滚动到底部
   const scrollToBottom = useCallback(() => {
@@ -88,7 +92,8 @@ export default function GamePlay({
         handleGenerateEvents(0, controller.signal)
       },
       (err) => {
-        console.error('背景生成失败:', err)
+        addLog('error', `背景故事生成失败: ${err}`)
+        showToast('error', `背景生成失败: ${err}`)
         setIsGeneratingBg(false)
         // 即使失败也继续
         setAge(0)
@@ -168,7 +173,8 @@ export default function GamePlay({
           }
         },
         (err) => {
-          console.error('事件生成失败:', err)
+          addLog('error', `事件生成失败: ${err}`)
+          showToast('error', `事件生成失败: ${err}`)
           setIsGenerating(false)
           // 即使失败也推进年龄
           setAge(fromAge + 5)
@@ -189,6 +195,8 @@ export default function GamePlay({
       setIsGenerating,
       addYearEvents,
       scrollToBottom,
+      showToast,
+      addLog,
     ]
   )
 

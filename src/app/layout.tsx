@@ -1,6 +1,10 @@
 import type { Metadata } from 'next'
 import { Noto_Sans_SC, Noto_Serif_SC } from 'next/font/google'
 import './globals.css'
+import ToastContainer from '@/components/ToastContainer'
+import SettingsModal from '@/components/SettingsModal'
+import LogPanel from '@/components/LogPanel'
+import GlobalToolbar from '@/components/GlobalToolbar'
 
 const notoSans = Noto_Sans_SC({
   subsets: ['latin'],
@@ -29,6 +33,10 @@ export default function RootLayout({
   return (
     <html lang="zh-CN" className={`${notoSans.variable} ${notoSerif.variable}`}>
       <body className="min-h-screen">
+        <GlobalToolbar />
+        <SettingsModal />
+        <LogPanel />
+        <ToastContainer />
         {children}
       </body>
     </html>

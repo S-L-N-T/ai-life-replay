@@ -70,21 +70,45 @@ interface ChatMessage {
   content: string
 }
 
+export interface ApiSettingsOverride {
+  baseURL?: string
+  apiKey?: string
+  model?: string
+}
+
 interface AIStreamOptions {
   messages: ChatMessage[]
   temperature?: number
   maxTokens?: number
+  apiSettings?: ApiSettingsOverride
 }
 
 export async function* streamAI(options: AIStreamOptions): AsyncGenerator<string> {
-  const response = await fetch(`${AI_API_BASE}/chat/completions`, {
+  const baseURL = options.apiSettings?.baseURL?.trim() || AI_API_BASE
+  const apiKey = options.apiSettings?.apiKey?.trim() || AI_API_KEY
+  const model = options.apiSettings?.model?.trim() || AI_MODEL
+
+  // Validate baseURL to prevent SSRF – only http/https are permitted.
+  // Note: the user-provided URL is intentionally forwarded so users can configure
+  // their own AI API provider; the protocol check limits attack surface.
+  try {
+    const parsed = new URL(baseURL)
+    if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
+      throw new Error('不支持的 URL 协议，仅允许 http/https')
+    }
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : '无效的 Base URL'
+    throw new Error(msg)
+  }
+
+  const response = await fetch(`${baseURL}/chat/completions`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'Authorization': `Bearer ${AI_API_KEY}`,
+      'Authorization': `Bearer ${apiKey}`,
     },
     body: JSON.stringify({
-      model: AI_MODEL,
+      model,
       messages: options.messages,
       temperature: options.temperature ?? 0.8,
       max_tokens: options.maxTokens ?? 4096,
