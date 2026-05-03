@@ -91,4 +91,4 @@ export const customWorldRaceOptions = [
 ]
 
 // 游戏阶段枚举
-export type GamePhase = 'idle' | 'attributes' | 'talents' | 'playing' | 'review'
+export type GamePhase = 'idle' | 'identity' | 'attributes' | 'talents' | 'preview' | 'playing' | 'review'

@@ -14,7 +14,7 @@ export async function POST(request: NextRequest) {
   const stream = new ReadableStream({
     async start(controller) {
       try {
-        for await (const chunk of streamAI({ messages, temperature: 0.8, maxTokens: 1024, apiSettings })) {
+        for await (const chunk of streamAI({ messages, temperature: 0.8, maxTokens: 2048, apiSettings })) {
           const data = JSON.stringify({ text: chunk })
           controller.enqueue(encoder.encode(`data: ${data}\n\n`))
         }

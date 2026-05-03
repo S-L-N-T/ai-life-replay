@@ -122,7 +122,11 @@ export async function streamRequest(
 export interface GameEventData {
   age: number
   text: string
-  choices?: { text: string; effect: string }[]
+  choices?: {
+    text: string
+    effect: string
+    effects?: { key: string; delta: number }[]
+  }[]
 }
 
 export interface BackgroundData {

@@ -8,6 +8,7 @@ import WorldSelection from '@/components/WorldSelection'
 import AttrAllocation from '@/components/AttrAllocation'
 import TalentSelection from '@/components/TalentSelection'
 import GenderRaceSelection from '@/components/GenderRaceSelection'
+import FatePreview from '@/components/FatePreview'
 import GamePlay from '@/components/GamePlay'
 import LifeSummary from '@/components/LifeSummary'
 import { GAME_CONFIG } from '@/data/config'
@@ -49,21 +50,17 @@ export default function GamePage() {
 
   // 阶段过渡
   const handleAttrNext = () => handlePhaseTransition('talents')
-  const handleTalentNext = () => handlePhaseTransition('playing')
+  const handleTalentNext = () => handlePhaseTransition('preview')
   const handleTalentBack = () => handlePhaseTransition('attributes')
-  const handleGenderBack = () => handlePhaseTransition('talents')
+  const handleGenderBack = () => handlePhaseTransition('idle')
   const handleGenderNext = () => {
-    handlePhaseTransition('playing')
+    handlePhaseTransition('attributes')
   }
 
   // 世界选择后，跳过性别种族直接进入属性分配
   const originalSelectWorld = useGameStore.getState().selectWorld
   const handleWorldSelected = () => {
-    // selectWorld 已经处理了 phase 变化
-    const s = useGameStore.getState()
-    if (s.selectedWorld) {
-      handlePhaseTransition('attributes')
-    }
+    // selectWorld 已经处理了 phase 变化（store 将进入 identity）
   }
 
   // 检查是否所有选择完成
@@ -117,7 +114,32 @@ export default function GamePage() {
             exit={{ opacity: 0, x: -50 }}
             transition={{ duration: 0.3 }}
           >
-            <TalentSelection onNext={() => handlePhaseTransition('playing')} onBack={() => handlePhaseTransition('attributes')} />
+            <TalentSelection onNext={handleTalentNext} onBack={handleTalentBack} />
+          </motion.div>
+        )}
+
+        {/* 身份设定（性别/种族/自定义） */}
+        {gamePhase === 'identity' && (
+          <motion.div
+            key="identity"
+            initial={{ opacity: 0, x: 50 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: -50 }}
+            transition={{ duration: 0.3 }}
+          >
+            <GenderRaceSelection onNext={handleGenderNext} onBack={handleGenderBack} />
+          </motion.div>
+        )}
+
+        {/* 命运预览 */}
+        {gamePhase === 'preview' && (
+          <motion.div
+            key="fate-preview"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+          >
+            <FatePreview onStart={() => handlePhaseTransition('playing')} onBack={() => handlePhaseTransition('talents')} />
           </motion.div>
         )}
 

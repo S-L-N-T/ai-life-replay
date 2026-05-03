@@ -26,7 +26,11 @@ export default function GamePlay({
   const setAge = useGameStore((s) => s.setAge)
   const maxAge = useGameStore((s) => s.maxAge)
   const yearEvents = useGameStore((s) => s.yearEvents)
+  const bufferedEvents = useGameStore((s) => s.bufferedEvents)
   const addYearEvents = useGameStore((s) => s.addYearEvents)
+  const bufferedAddYearEvents = useGameStore((s) => s.bufferedAddYearEvents)
+  const consumeBufferedEvent = useGameStore((s) => s.consumeBufferedEvent)
+  const clearBufferedEvents = useGameStore((s) => s.clearBufferedEvents)
   const setDead = useGameStore((s) => s.setDead)
   const isDead = useGameStore((s) => s.isDead)
   const setIsGenerating = useGameStore((s) => s.setIsGenerating)
@@ -39,8 +43,10 @@ export default function GamePlay({
   const [currentDisplay, setCurrentDisplay] = useState('')
   const [currentEventIdx, setCurrentEventIdx] = useState(0)
   const [lastDecisionAge, setLastDecisionAge] = useState(0)
+  const [customInputs, setCustomInputs] = useState<Record<number, string>>({})
 
   const abortRef = useRef<AbortController | null>(null)
+  const prefetchLockRef = useRef(false)
   const displayRef = useRef('')
   const bottomRef = useRef<HTMLDivElement>(null)
 
@@ -89,7 +95,7 @@ export default function GamePlay({
         setAge(0)
         setLastDecisionAge(0)
         // 生成第一个事件
-        handleGenerateEvents(0, controller.signal)
+        handleGenerateEvents(0, undefined, controller.signal)
       },
       (err) => {
         addLog('error', `背景故事生成失败: ${err}`)
@@ -105,25 +111,50 @@ export default function GamePlay({
     return () => controller.abort()
   }, [])
 
-  // 生成游戏事件
+  // 生成游戏事件（支持预取和重试）
   const handleGenerateEvents = useCallback(
-    async (fromAge: number, signal?: AbortSignal) => {
-      if (!signal) {
-        abortRef.current = new AbortController()
+    async (
+      fromAge: number,
+      options?: { buffer?: boolean; attempt?: number },
+      signal?: AbortSignal
+    ) => {
+      const buffer = options?.buffer ?? false
+      const attempt = options?.attempt ?? 0
+
+      if (buffer && prefetchLockRef.current) return
+      if (buffer) {
+        prefetchLockRef.current = true
+      } else {
+        setIsGenerating(true)
       }
 
-      setIsGenerating(true)
+      const activeSignal = signal || (!buffer ? (abortRef.current = new AbortController(), abortRef.current.signal) : undefined)
 
       const attrMap: Record<string, number> = {}
       attributes.forEach((a) => { attrMap[a.key] = a.value })
 
       const historyText = yearEvents.map((e) => `[${e.age}岁] ${e.text}`)
 
+      const releaseBufferLock = () => {
+        if (buffer) prefetchLockRef.current = false
+      }
+
+      const retry = () => {
+        if (attempt < 2) {
+          releaseBufferLock()
+          window.setTimeout(() => {
+            handleGenerateEvents(fromAge, { buffer, attempt: attempt + 1 }, signal)
+          }, 400)
+          return true
+        }
+        return false
+      }
+
       generateEvents(
         {
           worldLine: selectedWorld?.id || 'modern',
           currentAge: fromAge,
-          maxYears: 10,
+          maxYears: 1,
           attributes: attrMap,
           talents: selectedTalents.map((t) => t.name),
           acquiredAttributes,
@@ -133,53 +164,94 @@ export default function GamePlay({
           background,
         },
         (chunk) => {
-          setCurrentDisplay((prev) => prev + chunk)
+          if (!buffer) {
+            setCurrentDisplay((prev) => prev + chunk)
+          }
         },
         (fullText) => {
-          setCurrentDisplay('')
-          setIsGenerating(false)
-          // 解析 AI 返回的 JSON 事件
+          if (!buffer) setCurrentDisplay('')
+
+          const cleaned = fullText
+            .replace(/```json/g, '')
+            .replace(/```/g, '')
+            .trim()
+
           try {
-            const cleaned = fullText
-              .replace(/```json/g, '')
-              .replace(/```/g, '')
-              .trim()
+            if (!cleaned) throw new Error('返回内容为空')
             const parsed = JSON.parse(cleaned)
-            if (parsed.events && Array.isArray(parsed.events)) {
-              const events: YearEvent[] = parsed.events.map((ev: any) => ({
-                age: ev.age || fromAge,
-                text: ev.text || '',
-                choices: ev.choices
-                  ? ev.choices.map((c: any) => ({
-                      text: typeof c === 'string' ? c : c.text || '',
-                      effect: c.effect || '',
-                    }))
-                  : undefined,
-              }))
-              addYearEvents(events)
-              const lastAge = events[events.length - 1]?.age || fromAge
-              setAge(lastAge)
+            const rawEvents = Array.isArray(parsed?.events) ? parsed.events : []
+            if (rawEvents.length === 0) throw new Error('事件数组为空')
+
+            const events: YearEvent[] = rawEvents.map((ev: any) => ({
+              age: typeof ev.age === 'number' ? ev.age : fromAge,
+              text: typeof ev.text === 'string' ? ev.text : '',
+              choices: Array.isArray(ev.choices)
+                ? ev.choices.map((c: any) => ({
+                    text: typeof c === 'string' ? c : c?.text || '',
+                    effect: typeof c === 'string' ? '' : c?.effect || '',
+                    effects: Array.isArray(c?.effects)
+                      ? c.effects
+                          .map((ef: any) => ({
+                            key: String(ef?.key || ''),
+                            delta: Number(ef?.delta || 0),
+                          }))
+                          .filter((ef: { key: string; delta: number }) => ef.key)
+                      : undefined,
+                  }))
+                : undefined,
+            }))
+
+            if (buffer) {
+              clearBufferedEvents()
+              bufferedAddYearEvents(events)
+              saveToLocalStorage()
+              return
+            }
+
+            setIsGenerating(false)
+            addYearEvents(events)
+            saveToLocalStorage()
+            const lastAge = events[events.length - 1]?.age ?? fromAge + 1
+            setAge(lastAge)
+            scrollToBottom()
+
+            const lastEvent = events[events.length - 1]
+            if (!lastEvent?.choices || lastEvent.choices.length === 0) {
+              const nextAge = lastAge + 1
+              if (nextAge <= maxAge) {
+                handleGenerateEvents(nextAge, { buffer: true, attempt: 0 })
+              }
+            }
+          } catch (err) {
+            if (retry()) return
+
+            if (!buffer) {
+              addLog('error', `事件生成失败: ${err instanceof Error ? err.message : '解析失败'}`)
+              showToast('error', '事件生成失败，已回退到简化事件')
+              const fallback: YearEvent = {
+                age: fromAge + 1,
+                text: fullText || '这一年没有成功生成详细事件。',
+              }
+              addYearEvents([fallback])
+              saveToLocalStorage()
+              setAge(fromAge + 1)
               scrollToBottom()
             }
-          } catch {
-            // 如果解析失败，将原始文本作为事件展示
-            const fallback: YearEvent = {
-              age: fromAge,
-              text: fullText,
-            }
-            addYearEvents([fallback])
-            setAge(fromAge + 5)
-            scrollToBottom()
+          } finally {
+            releaseBufferLock()
           }
         },
         (err) => {
+          if (retry()) return
           addLog('error', `事件生成失败: ${err}`)
           showToast('error', `事件生成失败: ${err}`)
-          setIsGenerating(false)
-          // 即使失败也推进年龄
-          setAge(fromAge + 5)
+          if (!buffer) {
+            setIsGenerating(false)
+            setAge(fromAge + 1)
+          }
+          releaseBufferLock()
         },
-        signal
+        activeSignal
       )
     },
     [
@@ -191,9 +263,12 @@ export default function GamePlay({
       race,
       background,
       yearEvents,
+      maxAge,
       setAge,
       setIsGenerating,
       addYearEvents,
+      bufferedAddYearEvents,
+      clearBufferedEvents,
       scrollToBottom,
       showToast,
       addLog,
@@ -201,13 +276,18 @@ export default function GamePlay({
   )
 
   // 处理选择
-  const handleChoice = (eventIndex: number, choiceIndex: number) => {
+  const handleChoice = (eventIndex: number, choiceIndex: number, customChoice?: string) => {
     const store = useGameStore.getState()
-    store.makeChoice(eventIndex, choiceIndex)
+    store.makeChoice(eventIndex, choiceIndex, customChoice)
 
     const event = yearEvents[eventIndex]
     if (event) {
       setLastDecisionAge(event.age)
+      const nextAge = event.age + 1
+      const nextBuffered = bufferedEvents[0]
+      if (nextAge <= maxAge && (!nextBuffered || nextBuffered.age !== nextAge)) {
+        handleGenerateEvents(nextAge, { buffer: true, attempt: 0 })
+      }
     }
 
     // 自动保存
@@ -215,9 +295,9 @@ export default function GamePlay({
     scrollToBottom()
   }
 
-  // 继续游戏（推进到下一阶段）
+  // 继续游戏（推进到下一岁）
   const handleContinue = () => {
-    const nextAge = currentAge + 5
+    const nextAge = currentAge + 1
     if (nextAge >= maxAge) {
       // 到达最大年龄，自然死亡
       setAge(maxAge)
@@ -228,8 +308,25 @@ export default function GamePlay({
       return
     }
 
-    setAge(nextAge)
-    handleGenerateEvents(nextAge)
+    const buffered = bufferedEvents[0]
+    if (buffered && buffered.age === nextAge) {
+      const event = consumeBufferedEvent()
+      if (event) {
+        addYearEvents([event])
+        setAge(event.age)
+        saveToLocalStorage()
+        scrollToBottom()
+        if (!event.choices || event.choices.length === 0) {
+          const followingAge = event.age + 1
+          if (followingAge <= maxAge) {
+            handleGenerateEvents(followingAge, { buffer: true, attempt: 0 })
+          }
+        }
+        return
+      }
+    }
+
+    handleGenerateEvents(currentAge)
     scrollToBottom()
   }
 
@@ -253,6 +350,30 @@ export default function GamePlay({
     if (val >= 7) return '#f59e0b'
     if (val >= 4) return '#4ade80'
     return '#8888aa'
+  }
+
+  // 解析 effect 文本为结构化数组 [{ key, delta, label }]
+  function parseEffects(effectText?: string | undefined) {
+    if (!effectText) return [] as { key: string; delta: number; label?: string }[]
+    const res: { key: string; delta: number; label?: string }[] = []
+    const parts = effectText.split(/[,;，；\n]/)
+    for (const p of parts) {
+      const m = p.match(/([a-zA-Z\u4e00-\u9fa5_\-]+)\s*[:：]?\s*([+-]?\d+)/)
+      if (m) {
+        const rawKey = m[1].trim()
+        const delta = parseInt(m[2], 10) || 0
+        res.push({ key: rawKey, delta, label: rawKey })
+      }
+    }
+    return res
+  }
+
+  function getDisplayEffects(choice: any) {
+    const fromStructured: { key: string; delta: number; label?: string }[] = (choice && choice.effects) || []
+    const fromText = parseEffects(choice?.effect)
+    // if structured exists, prefer it but normalize label
+    const normalized = fromStructured.length ? fromStructured.map((e) => ({ ...e, label: e.label || e.key })) : fromText
+    return normalized
   }
 
   return (
@@ -325,7 +446,10 @@ export default function GamePlay({
                 {event.age} 岁
               </span>
               {event.chosenIndex !== undefined && (
-                <span className="text-xs text-green-400">已做选择</span>
+                <span className="text-xs text-green-400">
+                  已做选择
+                  {event.customChoice ? ` · ${event.customChoice}` : ''}
+                </span>
               )}
             </div>
 
@@ -333,23 +457,71 @@ export default function GamePlay({
 
             {/* 选择分支 */}
             {event.choices && event.chosenIndex === undefined && idx === yearEvents.length - 1 && (
-              <div className="space-y-2 mt-3 pt-3 border-t border-[#2a2a4a]">
+              <div className="space-y-3 mt-3 pt-3 border-t border-[#2a2a4a]">
                 <p className="text-xs text-[#8888aa] mb-2">你该怎么做？</p>
-                {event.choices.map((choice, ci) => (
-                  <button
-                    key={ci}
-                    className="choice-btn w-full"
-                    onClick={() => handleChoice(idx, ci)}
-                  >
-                    <span className="text-[#a78bfa] mr-2">{['A', 'B', 'C'][ci]}.</span>
-                    {choice.text}
-                    {choice.effect && (
-                      <span className="block text-xs text-[#666688] mt-0.5 ml-5">
-                        {choice.effect}
-                      </span>
-                    )}
-                  </button>
-                ))}
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {event.choices.slice(0, 3).map((choice, ci) => (
+                    <div
+                      key={ci}
+                      className="choice-card p-3 rounded-lg border cursor-pointer"
+                      onClick={() => handleChoice(idx, ci)}
+                      style={{ borderColor: 'rgba(167,139,250,0.15)' }}
+                    >
+                      <div className="flex items-start gap-3">
+                        <div className="text-lg font-bold text-[#a78bfa]">{['A', 'B', 'C'][ci]}</div>
+                        <div className="flex-1 text-sm">
+                          <div className="font-medium mb-1">{choice.text}</div>
+                          {choice.effect && (
+                            <div className="text-xs text-[#666688]">{choice.effect}</div>
+                          )}
+                          {/* 显示属性变化徽章（尝试解析结构化 effects 或 effect 文本） */}
+                          <div className="mt-2 flex gap-2 flex-wrap">
+                            {getDisplayEffects(choice).map((ef, i) => (
+                              <span key={i} className="text-xs px-2 py-0.5 rounded-full" style={{ background: ef.delta > 0 ? 'rgba(34,197,94,0.12)' : 'rgba(248,113,113,0.08)', color: ef.delta > 0 ? '#22c55e' : '#f87171', border: '1px solid rgba(0,0,0,0.06)' }}>
+                                {ef.label || ef.key} {ef.delta > 0 ? `+${ef.delta}` : ef.delta}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+
+                  {/* 自定义输入卡片 D */}
+                  <div className="choice-card p-3 rounded-lg border" style={{ borderColor: 'rgba(167,139,250,0.08)' }}>
+                    <div className="flex items-start gap-3">
+                      <div className="text-lg font-bold text-[#a78bfa]">D</div>
+                      <div className="flex-1 text-sm">
+                        <div className="font-medium mb-2">自定义输入</div>
+                        <div className="text-xs text-[#666688] mb-2">由你填写具体行动、回答或决定</div>
+                        <textarea
+                          value={customInputs[idx] || ''}
+                          onChange={(e) => setCustomInputs((s) => ({ ...s, [idx]: e.target.value }))}
+                          className="w-full rounded-md p-2 text-sm"
+                          placeholder="输入你的自定义选择，然后点击确认"
+                          rows={3}
+                        />
+                        <div className="flex gap-2 mt-2">
+                          <button
+                            className="btn-ghost btn-sm"
+                            onClick={() => setCustomInputs((s) => ({ ...s, [idx]: '' }))}
+                          >
+                            清空
+                          </button>
+                          <button
+                            className="btn-primary btn-sm"
+                            onClick={() => {
+                              const txt = (customInputs[idx] || '').trim()
+                              if (txt) handleChoice(idx, 3, txt)
+                            }}
+                            disabled={!((customInputs[idx] || '').trim())}
+                          >确认选择</button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
               </div>
             )}
           </motion.div>
@@ -377,7 +549,7 @@ export default function GamePlay({
       </div>
 
       {/* 底部操作区 */}
-      {!isGenerating && !isGeneratingBg && !isDead && yearEvents.length > 0 && (
+      {!isGenerating && !isGeneratingBg && !isDead && yearEvents.length > 0 && (!yearEvents[yearEvents.length - 1]?.choices || yearEvents[yearEvents.length - 1]?.chosenIndex !== undefined) && (
         <motion.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
@@ -387,7 +559,7 @@ export default function GamePlay({
             className="btn-primary w-full text-lg py-4"
             onClick={handleContinue}
           >
-            {currentAge + 5 >= maxAge ? '⏳ 度过余生...' : `▶ 继续 (${currentAge + 3}~${currentAge + 5}岁)`}
+            {currentAge + 1 >= maxAge ? '⏳ 度过余生...' : `▶ 下一岁 (${currentAge + 1}岁)`}
           </button>
 
           <div className="flex gap-3">

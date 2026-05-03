@@ -3,6 +3,8 @@
 
 import { NextRequest } from 'next/server'
 
+import { normalizeBaseURL } from '@/lib/urlUtils'
+
 // ============================================================
 // 类型定义
 // ============================================================
@@ -84,9 +86,20 @@ interface AIStreamOptions {
 }
 
 export async function* streamAI(options: AIStreamOptions): AsyncGenerator<string> {
-  const baseURL = options.apiSettings?.baseURL?.trim() || AI_API_BASE
+  const rawBaseURL = options.apiSettings?.baseURL || AI_API_BASE
+  let baseURL = normalizeBaseURL(rawBaseURL)
   const apiKey = options.apiSettings?.apiKey?.trim() || AI_API_KEY
   const model = options.apiSettings?.model?.trim() || AI_MODEL
+
+  // If the user-provided URL was invalid after normalization, fall back to the
+  // server-side default so the game can still proceed.
+  if (!baseURL) {
+    console.warn('[streamAI] user-provided baseURL could not be normalized, falling back to default:', rawBaseURL)
+    baseURL = normalizeBaseURL(AI_API_BASE)
+    if (!baseURL) {
+      throw new Error('服务器 AI_API_BASE 环境变量配置无效，请联系管理员')
+    }
+  }
 
   // Validate baseURL to prevent SSRF – only http/https are permitted.
   // Note: the user-provided URL is intentionally forwarded so users can configure
@@ -264,7 +277,7 @@ export function buildGeneratePrompt(req: GenerateRequest): ChatMessage[] {
     .map(([k, v]) => `${k}: ${v}`)
     .join(', ')
 
-  const systemPrompt = `你是一个擅长叙事的人生模拟系统。你将以"你"（第二人称）的口吻，为用户生成接下来的人生事件。
+  const systemPrompt = `你是一个严格遵循 JSON 输出协议的人生模拟叙事引擎。你必须始终以"你"（第二人称）的口吻生成内容。
 
 世界设定：${world.name}
 叙事风格：${world.style}
@@ -283,29 +296,38 @@ ${req.background}
 游戏已进行的人生事件摘要：
 ${req.eventHistory.slice(-5).join('\n')}
 
-请生成角色从 ${req.currentAge} 岁到 ${req.currentAge + req.maxYears} 岁之间的人生事件。注意：
-1. 每次生成 1-2 个主要事件，每 3-5 年一个事件
-2. 使用第二人称"你"叙述
-3. 每个事件包含可选的 2-3 个选择分支（choices）
-4. 事件应该符合角色的属性值和世界设定
-5. 不要提前结束游戏，按正常人生轨迹推进
-6. 如果有重要人生节点（升学、结婚、创业、突破等），描述详细一些
+硬性要求：
+1. 只输出一个 JSON 对象，禁止输出 Markdown、代码块、解释、前后缀文字
+2. JSON 必须可直接被 JSON.parse 解析，禁止注释、尾逗号、单引号、中文标点包裹的对象语法
+3. 事件必须推进 ${req.maxYears} 年，且只生成 1 个主要事件
+4. 绝大多数年份不输出 choices；只有在重大分歧、危机、转折、选择节点时才输出 choices
+5. 如果输出 choices，最多 4 个，强烈建议固定为 A/B/C/D；D 必须是“自定义输入”含义
+6. 每个 choice 必须包含：text、effect、effects
+   - text: 简短选项文案
+   - effect: 人类可读的后果总结
+   - effects: 结构化属性变化数组，例如 [{"key":"intelligence","delta":1},{"key":"money","delta":-2}]
+7. 没有属性变化时，effects 使用 []
+8. 属性 key 必须尽量使用当前世界已定义的 key；若无变化，保持空数组
+9. 事件应该符合角色属性、世界设定与年龄阶段
+10. 如果没有足够信息，请优先给出保守、稳定、可继续推进的人生叙事，不要提前终结
 
-输出格式：
+输出格式严格如下：
 {
   "events": [
     {
       "age": 当前年龄,
       "text": "事件描述文本",
       "choices": [
-        { "text": "选择A", "effect": "选择A的后果描述" },
-        { "text": "选择B", "effect": "选择B的后果描述" },
-        { "text": "选择C", "effect": "选择C的后果描述" }
+        {
+          "text": "选择A",
+          "effect": "后果描述",
+          "effects": [{ "key": "intelligence", "delta": 1 }]
+        }
       ]
     }
   ]
-}`
-
+}
+`
   return [
     { role: 'system', content: systemPrompt },
     { role: 'user', content: `请生成 ${req.currentAge} 岁到 ${req.currentAge + req.maxYears} 岁的事件。` },

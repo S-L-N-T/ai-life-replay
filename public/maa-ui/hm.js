@@ -1,0 +1,1 @@
+(function(){/* minimal copied hm.js from maa-ui for local reference; analytics disabled in local builds */})();
